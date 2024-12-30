@@ -599,12 +599,6 @@ def disc_result_page():
     pct_S = (total_S / total_all) * 100
     pct_C = (total_C / total_all) * 100
 
-    # Display percentages
-    st.subheader("Your DiSC Distribution:")
-    st.write(f"- **D (Dominance)**: {pct_D:.2f}%")
-    st.write(f"- **I (Influence)**: {pct_I:.2f}%")
-    st.write(f"- **S (Steadiness)**: {pct_S:.2f}%")
-    st.write(f"- **C (Conscientiousness)**: {pct_C:.2f}%")
 
     # Pick the best dimension
     final_scores = {"D": total_D, "I": total_I, "S": total_S, "C": total_C}
