@@ -1,5 +1,6 @@
 .streamlit/secrets.toml
-
+local_disc_tfidf_chunks.pkl
+local_disc_tfidf_vectorizer.pkl
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
