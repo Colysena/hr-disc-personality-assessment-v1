@@ -738,11 +738,14 @@ def disc_result_page():
 
     # ===== Save the CSV locally =====
     # Ensure the tmp directory exists
-    directory = "tmp"
-    if not os.path.exists(directory):
-         os.makedirs(directory)
 
-    local_file_path = "tmp/candidate_disc_result.csv"
+    base_dir = os.path.dirname(os.path.abspath(__file__))  # ตำแหน่งเดียวกับไฟล์ streamlit_app.py
+    tmp_dir = os.path.join(base_dir, "tmp")
+
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir)
+
+    local_file_path = os.path.join(tmp_dir, "candidate_disc_result.csv")
     df.to_csv(local_file_path, index=False)
     st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
 
