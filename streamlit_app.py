@@ -732,6 +732,16 @@ def disc_result_page():
 
     # ===== Save the CSV locally =====
     # You can choose any file path. We'll just keep it in the current working directory for clarity.
+    #local_file_path = "tmp/candidate_disc_result.csv"
+    #df.to_csv(local_file_path, index=False)
+    #st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
+
+    # ===== Save the CSV locally =====
+    # Ensure the tmp directory exists
+    directory = "tmp"
+    if not os.path.exists(directory):
+         os.makedirs(directory)
+
     local_file_path = "tmp/candidate_disc_result.csv"
     df.to_csv(local_file_path, index=False)
     st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
