@@ -5,7 +5,7 @@ local_disc_tfidf_vectorizer.pkl
 __pycache__/
 *.py[cod]
 *$py.class
-
+*csv
 # C extensions
 *.so
 

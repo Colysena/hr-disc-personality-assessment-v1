@@ -5,8 +5,30 @@ import google.generativeai as genai
 from retrieval import vectorizer, chunks
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import json
+from google.cloud import storage
+from google.oauth2 import service_account
+from datetime import datetime
+import uuid
+import os
+import pandas as pd
 
-# ดึง embeddings จาก retrieval.py
+# initialize GCS credential 
+service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+service_account_info = json.loads(service_account_json)
+credentials = service_account.Credentials.from_service_account_info(service_account_info)
+client = storage.Client(credentials=credentials, project=service_account_info["project_id"])
+
+# def upload df candidaet profile and result to the bucket
+def upload_to_gcs(bucket_name, destination_blob_name, local_file_path):
+    """
+    Uploads a local file to Google Cloud Storage.
+    """
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_filename(local_file_path)
+    st.success(f"File uploaded to GCS: gs://{bucket_name}/{destination_blob_name}")
+
 
 ###############################################################################
 # 0) Page Navigation
@@ -63,27 +85,32 @@ def hr_form_page():
 ###############################################################################
 # 3) Page: Chat with Candidate Result
 ###############################################################################
+
 def add_base_styles():
-    st.markdown("""
+    """
+    Adds base CSS styles to the Streamlit app, such as background color,
+    container width, and button styling.
+    """
+    st.markdown(
+        """
         <style>
         body {
             background-color: #f9f9f9;
         }
-        .css-1oe6wy4, .css-1y4p8pa {  
+        /* Container styling */
+        .css-1oe6wy4, .css-1y4p8pa {
             max-width: 800px;
             margin: auto;
         }
+        /* Button styling */
         .stButton>button {
             background-color: #4CAF50;
             color: white;
         }
-        .custom-icon {
-            text-align: center;
-            font-size: 50px;
-            margin-bottom: 20px;
-        }
         </style>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True
+    )
 
 
 def chat_with_candidate_result_page():
@@ -239,7 +266,7 @@ def candidate_form_page():
         surname = st.text_input("Surname")
         age = st.number_input("Age", min_value=18, max_value=99, step=1)
         gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-        applied_position = st.text_input("Applied Position")
+        applied_position = st.selectbox("Applied Position", ["Project Manager", "Product Owner", "HR Manager", "Accounting Manager", "Finance Manager", "Sale Manager", "Operation Manager", "Data Analyst", "Data Engineer", "Data Science", "Marketing Manager", "Strategy Manager", "Procurement Manager"])
         submitted = st.form_submit_button("Submit")
 
         if submitted:
@@ -270,26 +297,26 @@ def candidate_form_page():
 def question_1_page():
     add_base_styles()
     st.title("Question 1")
-    st.write("How do you handle a situation where you need to change your plan?")
+    st.write("How do you handle a situation where you need to change your plan — adapt quickly or proceed carefully?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you adapt quickly and make adjustments on the fly without much hesitation? or<br>
-                &nbsp;&nbsp;- Do you prefer to pause, assess the situation, and carefully consider how to proceed before making changes?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+       # """
+        #<div style="
+            #background-color: #FAFAFA;
+            #border-left: 4px solid #007ACC;
+            #padding: 10px;
+            #margin-top: 10px;
+            #border-radius: 4px;
+       # ">
+            #<p style="font-size:15px; color:#333; margin:0;">
+               # <strong>More detail:</strong><br>
+                #&nbsp;&nbsp;- Do you adapt quickly and make adjustments on the fly without much hesitation? or<br>
+                #&nbsp;&nbsp;- Do you prefer to pause, assess the situation, and carefully consider how to proceed before making changes?
+          #  </p>
+       #</div>
+       # """,
+       # unsafe_allow_html=True
+    #)
 
     # Real-time text area with a session key
     response = st.text_area("Your answer:", key="q1_response", on_change=None)
@@ -321,26 +348,26 @@ def question_1_page():
 def question_2_page():
     add_base_styles()
     st.title("Question 2")
-    st.write("How do you handle deadlines?")
+    st.write("How do you approach deadlines and managing your time — get things done quickly or plan thoughtfully?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you respond to time constraints immediately, focusing on getting things done as quickly as possible, even under pressure? or<br>
-                &nbsp;&nbsp;- Do you take a step back, allocate time carefully, and plan things out before taking action?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+        #"""
+        #<div style="
+            #background-color: #FAFAFA;
+            #border-left: 4px solid #007ACC;
+            #padding: 10px;
+            #margin-top: 10px;
+            #border-radius: 4px;
+        #">
+            #<p style="font-size:15px; color:#333; margin:0;">
+               # <strong>More detail:</strong><br>
+               # &nbsp;&nbsp;- Do you respond to time constraints immediately, focusing on getting things done as quickly as possible, even under pressure? or<br>
+               # &nbsp;&nbsp;- Do you take a step back, allocate time carefully, and plan things out before taking action?
+          #  </p>
+       # </div>
+       # """,
+       # unsafe_allow_html=True
+    #)
 
     response = st.text_area("Your answer:", key="q2_response")
     
@@ -369,26 +396,26 @@ def question_2_page():
 def question_3_page():
     add_base_styles()
     st.title("Question 3")
-    st.write("When faced with conflict, do you tend to prioritize maintaining relationships or focus on addressing the issue efficiently?")
+    st.write("When faced with conflict, do you prefer to resolve it directly through clear discussion, or focus on maintaining harmony and preserving relationships?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you address conflict directly, questioning the issue and seeking to resolve it through clear discussion? or<br>
-                &nbsp;&nbsp;- Do you focus on finding common ground, maintaining harmony, and avoiding unnecessary tension?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+       #"""
+        #<div style="
+            #background-color: #FAFAFA;
+            #border-left: 4px solid #007ACC;
+            #padding: 10px;
+            #margin-top: 10px;
+            #border-radius: 4px;
+       # ">
+            #<p style="font-size:15px; color:#333; margin:0;">
+                #<strong>More detail:</strong><br>
+                #&nbsp;&nbsp;- Do you address conflict directly, questioning the issue and seeking to resolve it through clear discussion? or<br>
+                #&nbsp;&nbsp;- Do you focus on finding common ground, maintaining harmony, and avoiding unnecessary tension?
+           # </p>
+       # </div>
+        #""",
+       # unsafe_allow_html=True
+   # )
 
     response = st.text_area("Your answer:", key="q3_response")
     
@@ -416,26 +443,26 @@ def question_3_page():
 def question_4_page():
     add_base_styles()
     st.title("Question 4")
-    st.write("When presented with a new idea, do you tend to first think about how it will impact the people involved or how it will be executed?")
+    st.write("When presented with a new idea, do you consider its impact on people, question its validity, or welcome it with optimism?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you approach it with skepticism, asking questions to understand its validity and implications? or<br>
-                &nbsp;&nbsp;- Are you open and accepting, embracing the idea with enthusiasm and trust in its potential?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+       # """
+        #<div style="
+          #  background-color: #FAFAFA;
+           # border-left: 4px solid #007ACC;
+           # padding: 10px;
+           # margin-top: 10px;
+           # border-radius: 4px;
+       # ">
+            #<p style="font-size:15px; color:#333; margin:0;">
+               # <strong>More detail:</strong><br>
+               # &nbsp;&nbsp;- Do you approach it with skepticism, asking questions to understand its validity and implications? or<br>
+               # &nbsp;&nbsp;- Are you open and accepting, embracing the idea with enthusiasm and trust in its potential?
+          #  </p>
+       # </div>
+      #  """,
+      #  unsafe_allow_html=True
+    #)
 
     response = st.text_area("Your answer:", key="q4_response")
     
@@ -463,26 +490,26 @@ def question_4_page():
 def question_5_page():
     add_base_styles()
     st.title("Question 5")
-    st.write("When you have a new task, how do you usually begin?")
+    st.write("When you have a new task, do you jump in quickly to get started, or take time to understand it fully, gather information, and create a plan?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you jump in quickly, eager to get started without much delay? or<br>
-                &nbsp;&nbsp;- Do you prefer to take your time to fully understand the task, gather information, and create a plan before starting?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+       # """
+      #  <div style="
+        #    background-color: #FAFAFA;
+        #    border-left: 4px solid #007ACC;
+        #    padding: 10px;
+        #    margin-top: 10px;
+        #    border-radius: 4px;
+       # ">
+           # <p style="font-size:15px; color:#333; margin:0;">
+           #     <strong>More detail:</strong><br>
+           #     &nbsp;&nbsp;- Do you jump in quickly, eager to get started without much delay? or<br>
+           #     &nbsp;&nbsp;- Do you prefer to take your time to fully understand the task, gather information, and create a plan before starting?
+          #  </p>
+       # </div>
+       # """,
+      #  unsafe_allow_html=True
+     #)
 
     response = st.text_area("Your answer:", key="q5_response")
     
@@ -510,26 +537,26 @@ def question_5_page():
 def question_6_page():
     add_base_styles()
     st.title("Question 6")
-    st.write("When making an important decision, do you first think about practical goals or the people involved?")
+    st.write("When making a decision, do you focus on goals, rely on your judgment, or consider others' perspectives?")
 
-    st.markdown(
-        """
-        <div style="
-            background-color: #FAFAFA;
-            border-left: 4px solid #007ACC;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
-        ">
-            <p style="font-size:15px; color:#333; margin:0;">
-                <strong>More detail:</strong><br>
-                &nbsp;&nbsp;- Do you rely on your own judgment, ask critical questions, and carefully evaluate all options before deciding? or<br>
-                &nbsp;&nbsp;- Do you consider other people perspectives, and collaborate in the decision-making process?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    #st.markdown(
+       # """
+        #<div style="
+           # background-color: #FAFAFA;
+           # border-left: 4px solid #007ACC;
+           # padding: 10px;
+           # margin-top: 10px;
+           # border-radius: 4px;
+      #  ">
+           # <p style="font-size:15px; color:#333; margin:0;">
+              #  <strong>More detail:</strong><br>
+              #  &nbsp;&nbsp;- Do you rely on your own judgment, ask critical questions, and carefully evaluate all options before deciding? or<br>
+              #  &nbsp;&nbsp;- Do you consider other people perspectives, and collaborate in the decision-making process?
+           # </p>
+      #  </div>
+      #  """,
+      #  unsafe_allow_html=True
+    #)
 
     response = st.text_area("Your answer:", key="q6_response")
     
@@ -604,6 +631,29 @@ def disc_result_page():
     final_scores = {"D": total_D, "I": total_I, "S": total_S, "C": total_C}
     best_type = max(final_scores, key=final_scores.get)
     
+    # --- Generate timestamp and unique ID ---
+    current_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # e.g., "2024-07-31_13-45-00"
+    unique_id = str(uuid.uuid4())  # e.g., "bd65600d-8669-4903-8a14-af88203add38"
+
+    # Gather candidate info
+    candidate_info = st.session_state["candidate_data"]  # from candidate_form_page
+
+    # Create DataFrame
+    df = pd.DataFrame([{
+        "Unique ID": unique_id,
+        "Timestamp": current_timestamp,           # store timestamp
+        "Name": candidate_info["name"],
+        "Surname": candidate_info["surname"],
+        "Age": candidate_info["age"],
+        "Gender": candidate_info["gender"],
+        "Applied Position": candidate_info["applied_position"],
+        "DiSC Result": best_type,
+        "D score percentage": pct_D,
+        "I score percentage": pct_I,
+        "S score percentage": pct_S,
+        "C score percentage": pct_C
+    }])
+
     # --- LAYOUT: left for text, right for graph
     col_left, col_right = st.columns([1.3, 1])
 
@@ -677,6 +727,24 @@ def disc_result_page():
 
     # Show the standard description
     show_disc_description(best_type)
+    
+    st.success(f"Thank you very much for your time. Please go through the link to evaluate this project : https://forms.gle/oPcrYYaDc1FwhuA26 ")
+
+    # ===== Save the CSV locally =====
+    # You can choose any file path. We'll just keep it in the current working directory for clarity.
+    local_file_path = "tmp/candidate_disc_result.csv"
+    df.to_csv(local_file_path, index=False)
+    st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
+
+    # ===== Upload the CSV to GCS =====
+    # In the filename, include the name, surname, and timestamp. 
+    # For instance: "disc_results/John_Doe_2024-07-31_13-45-00.csv"
+    bucket_name = "streamlit-disc-candidate-bucket"
+    destination_blob_name = f"disc_results/{candidate_info['name']}_{candidate_info['surname']}_{current_timestamp}.csv"
+
+    upload_to_gcs(bucket_name, destination_blob_name, local_file_path)
+    
+
 
 def show_disc_description(disc_type):
     """Display the final text block for the chosen type."""
@@ -744,6 +812,7 @@ def add_base_styles():
         }
         </style>
     """, unsafe_allow_html=True)
+
 
 ###############################################################################
 # MAIN: Router
