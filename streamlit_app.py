@@ -319,7 +319,7 @@ def question_1_page():
     #)
 
     # Real-time text area with a session key
-    response = st.text_area("Your answer:", key="q1_response", on_change=None)
+    response = st.text_area("Your answer - please answer in English:", key="q1_response", on_change=None)
     
     # Real-time word count
     word_count = len(st.session_state.q1_response.strip().split())
@@ -369,7 +369,7 @@ def question_2_page():
        # unsafe_allow_html=True
     #)
 
-    response = st.text_area("Your answer:", key="q2_response")
+    response = st.text_area("Your answer - please answer in English:", key="q2_response")
     
     word_count = len(st.session_state.q2_response.strip().split())
     st.info(f"Words typed: {word_count}/15")
@@ -417,7 +417,7 @@ def question_3_page():
        # unsafe_allow_html=True
    # )
 
-    response = st.text_area("Your answer:", key="q3_response")
+    response = st.text_area("Your answer - please answer in English:", key="q3_response")
     
     word_count = len(st.session_state.q3_response.strip().split())
     st.info(f"Words typed: {word_count}/15")
@@ -464,7 +464,7 @@ def question_4_page():
       #  unsafe_allow_html=True
     #)
 
-    response = st.text_area("Your answer:", key="q4_response")
+    response = st.text_area("Your answer - please answer in English:", key="q4_response")
     
     word_count = len(st.session_state.q4_response.strip().split())
     st.info(f"Words typed: {word_count}/15")
@@ -511,7 +511,7 @@ def question_5_page():
       #  unsafe_allow_html=True
      #)
 
-    response = st.text_area("Your answer:", key="q5_response")
+    response = st.text_area("Your answer - please answer in English:", key="q5_response")
     
     word_count = len(st.session_state.q5_response.strip().split())
     st.info(f"Words typed: {word_count}/15")
@@ -558,7 +558,7 @@ def question_6_page():
       #  unsafe_allow_html=True
     #)
 
-    response = st.text_area("Your answer:", key="q6_response")
+    response = st.text_area("Your answer - please answer in English:", key="q6_response")
     
     word_count = len(st.session_state.q6_response.strip().split())
     st.info(f"Words typed: {word_count}/15")
