@@ -27,7 +27,7 @@ def upload_to_gcs(bucket_name, destination_blob_name, local_file_path):
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(local_file_path)
-    st.success(f"File uploaded to GCS: gs://{bucket_name}/{destination_blob_name}")
+  #  st.success(f"File uploaded to GCS: gs://{bucket_name}/{destination_blob_name}")
 
 
 ###############################################################################
@@ -747,7 +747,7 @@ def disc_result_page():
 
     local_file_path = os.path.join(tmp_dir, "candidate_disc_result.csv")
     df.to_csv(local_file_path, index=False)
-    st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
+    #st.info(f"CSV saved locally: {os.path.abspath(local_file_path)}")
 
     # ===== Upload the CSV to GCS =====
     # In the filename, include the name, surname, and timestamp. 
@@ -792,13 +792,13 @@ def disc_result_page():
     # Save the new answers DataFrame as CSV locally
     answers_file_path = os.path.join(tmp_dir, "candidate_answers_disc_sim.csv")
     df_answers.to_csv(answers_file_path, index=False)
-    st.info(f"Answers + Similarities CSV saved locally: {os.path.abspath(answers_file_path)}")
+    #st.info(f"Answers + Similarities CSV saved locally: {os.path.abspath(answers_file_path)}")
 
     # Upload this CSV to a *new folder* in GCS
     # The user wants something like: "(New folder name)/Name_Surname_2025-01-02_12-34-56.csv"
     new_folder_blob = f"(answers_result)/{candidate_info['name']}_{candidate_info['surname']}_{current_timestamp}.csv"
     upload_to_gcs(bucket_name, new_folder_blob, answers_file_path)
-    st.success("Detailed answers + similarity file has been uploaded to GCS in the new folder!")
+   # st.success("Detailed answers + similarity file has been uploaded to GCS in the new folder!")
 
 
 def show_disc_description(disc_type):
