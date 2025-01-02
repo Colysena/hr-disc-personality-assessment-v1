@@ -757,6 +757,48 @@ def disc_result_page():
 
     upload_to_gcs(bucket_name, destination_blob_name, local_file_path)
     
+    # --- Save detailed answers + similarities as a new CSV ---
+    # Build a row for each question: answer, D similarity, I similarity, S similarity, C similarity
+    rows = []
+    for qid in ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"]:
+        answer_text = st.session_state.disc_data[qid]["answer"]
+        # Initialize D, I, S, C for each question
+        similarity_map = {"D": 0.0, "I": 0.0, "S": 0.0, "C": 0.0}
+        for sim, chunk in st.session_state.disc_data[qid]["similarities"]:
+            disc_type = chunk["type"]
+            # Assign that similarity
+            similarity_map[disc_type] = sim
+
+        row = {
+            "answer": answer_text,
+            "D cosine similarity": similarity_map["D"],
+            "I cosine similarity": similarity_map["I"],
+            "S cosine similarity": similarity_map["S"],
+            "C cosine similarity": similarity_map["C"]
+        }
+        rows.append(row)
+
+    df_answers = pd.DataFrame(
+        rows, 
+        columns=[
+            "answer",
+            "D cosine similarity",
+            "I cosine similarity",
+            "S cosine similarity",
+            "C cosine similarity",
+        ]
+    )
+
+    # Save the new answers DataFrame as CSV locally
+    answers_file_path = os.path.join(tmp_dir, "candidate_answers_disc_sim.csv")
+    df_answers.to_csv(answers_file_path, index=False)
+    st.info(f"Answers + Similarities CSV saved locally: {os.path.abspath(answers_file_path)}")
+
+    # Upload this CSV to a *new folder* in GCS
+    # The user wants something like: "(New folder name)/Name_Surname_2025-01-02_12-34-56.csv"
+    new_folder_blob = f"(answers_result)/{candidate_info['name']}_{candidate_info['surname']}_{current_timestamp}.csv"
+    upload_to_gcs(bucket_name, new_folder_blob, answers_file_path)
+    st.success("Detailed answers + similarity file has been uploaded to GCS in the new folder!")
 
 
 def show_disc_description(disc_type):
