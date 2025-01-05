@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 from retrieval import retrieve_top_n, get_max_similarity
-import google.generativeai as genai
+import google.generativeai as palm
 from retrieval import vectorizer, chunks
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -12,6 +12,7 @@ from datetime import datetime
 import uuid
 import os
 import pandas as pd
+import io
 
 # initialize GCS credential 
 service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
@@ -112,6 +113,53 @@ def add_base_styles():
         unsafe_allow_html=True
     )
 
+###############################################################################
+# 3) Maddie Chatbot
+###############################################################################
+
+import json
+import io
+
+def merge_csv_from_gcs(bucket_name, prefix):
+    """Helper function to merge multiple CSVs from GCS into a single DataFrame."""
+    # --- Initialize GCS credential ---
+    service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+    service_account_info = json.loads(service_account_json)
+    credentials = service_account.Credentials.from_service_account_info(service_account_info)
+    storage_client = storage.Client(credentials=credentials, project=service_account_info["project_id"])
+    
+    # Get the bucket and list CSV blobs
+    bucket = storage_client.get_bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=prefix)
+    
+    df_list = []
+    for blob in blobs:
+        if blob.name.endswith(".csv"):
+            csv_data = blob.download_as_text()
+            df_temp = pd.read_csv(io.StringIO(csv_data))
+            df_list.append(df_temp)
+    
+    # Merge all DataFrames
+    if df_list:
+        df_merged = pd.concat(df_list, ignore_index=True)
+        return df_merged
+    else:
+        return pd.DataFrame()
+
+def get_position_trait_data(bucket_name, file_path):
+    """Fetch the position_trait_v1.csv from GCS and return as a DataFrame."""
+    # --- Initialize GCS credential ---
+    service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+    service_account_info = json.loads(service_account_json)
+    credentials = service_account.Credentials.from_service_account_info(service_account_info)
+    storage_client = storage.Client(credentials=credentials, project=service_account_info["project_id"])
+
+    # Fetch the CSV
+    bucket = storage_client.get_bucket(bucket_name)
+    blob = bucket.blob(file_path)
+    csv_data = blob.download_as_text()
+    df_position_trait = pd.read_csv(io.StringIO(csv_data))
+    return df_position_trait
 
 def chat_with_candidate_result_page():
     st.markdown("<h2 style='text-align: center; color: #4CAF50;'>Chat with Maddie Results</h2>", unsafe_allow_html=True)
@@ -144,23 +192,35 @@ def chat_with_candidate_result_page():
         </style>
     """, unsafe_allow_html=True)
 
-    # Fetch Gemini API Key from secrets
+    # 1) CONFIGURE Google Generative AI (Palm) with your key
     gemini_api_key = st.secrets["credentials"]["gemini_api_key"]
-
-
-    # Configure the Gemini API
     try:
-        genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-pro")
-        st.success("Gemini API Key successfully configured.")
+        palm.configure(api_key=gemini_api_key)
+        st.success("Gemini (Palm) API Key successfully configured.")
     except Exception as e:
         st.error(f"An error occurred while setting up the Gemini model: {e}")
         return
 
-    # Initialize chat history
+    # 2) PREPARE DATA
+    bucket_name = "streamlit-disc-candidate-bucket"
+
+    # Merge all CSVs within disc_results/
+    prefix = "disc_results/"
+    df_merged = merge_csv_from_gcs(bucket_name, prefix)
+
+    # Load the position_trait_v1.csv
+    trait_file_path = "position_trait/position_trait_v1.csv"
+    df_position_trait = get_position_trait_data(bucket_name, trait_file_path)
+
+    # Store data in session state for re-use
+    if "df_merged" not in st.session_state:
+        st.session_state["df_merged"] = df_merged
+    if "df_position_trait" not in st.session_state:
+        st.session_state["df_position_trait"] = df_position_trait
+
+    # 3) INITIALIZE CHAT HISTORY
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-        # Maddie initiates the conversation
         initial_message = (
             "Hello, I’m Maddie—your dedicated HR companion for DiSC insights! "
             "I’m here to help you evaluate how each candidate’s DiSC profile aligns with the role you’re trying to fill. "
@@ -177,7 +237,7 @@ def chat_with_candidate_result_page():
             unsafe_allow_html=True,
         )
 
-    # Display previous chat history
+    # 4) DISPLAY EXISTING CHAT
     for role, message in st.session_state.chat_history:
         if role == "assistant":
             st.markdown(
@@ -192,65 +252,132 @@ def chat_with_candidate_result_page():
         else:
             st.chat_message(role).markdown(message)
 
-    # Initial questions for Maddie
+    # 5) PRESENT INITIAL QUESTION CHOICES (No "Ask Maddie" button—just the selectbox)
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("### Select a Question to Begin:")
     initial_questions = [
-        "Which of the candidate’s DiSC dimensions is most dominant, and how might that impact their fit for the position?",
-        "Which candidate’s communication style aligns most closely with Finance team’s culture?"
+        "Would you like me to help you understand candidate DiSC personality better for hiring?",
+        "Guiding DiSC profile for new position"
     ]
-    selected_question = st.selectbox("Choose a question to ask Maddie:", initial_questions, index=0)
+    selected_question = st.selectbox("Choose topic to ask Maddie:", initial_questions, index=0)
 
-    if st.button("Ask Maddie"):
-        st.session_state.chat_history.append(("user", selected_question))
-        st.chat_message("user").markdown(selected_question)
-
-        # Generate response from Maddie
+    def generate_text_from_google(prompt_text: str) -> str:
+        """Call Google's generative AI and return the text result."""
+        model_name = "models/text-bison-001"  # Or "models/chat-bison-001"
         try:
-            personality_prompt = (
-                "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
-                "You have access to candidate results and can provide insights based on the DiSC framework. "
-                "Always be professional, polite, and insightful."
+            response = palm.generate_text(
+                model=model_name,
+                prompt=prompt_text,
+                temperature=0.7,
+                candidate_count=1
             )
-
-            candidate_results = st.session_state.get("disc_data", "No candidate results found.")
-            full_input = f"{personality_prompt}\nCandidate Results: {candidate_results}\nUser: {selected_question}\nAssistant:"
-
-            response = model.generate_content(full_input)
-            bot_response = response.text
-
-            # Display bot response
-            st.session_state.chat_history.append(("assistant", bot_response))
-            st.chat_message("assistant").markdown(bot_response)
+            return response.result
         except Exception as e:
-            st.error(f"An error occurred while generating the response: {e}")
+            st.error(f"Error calling Palm API: {e}")
+            return "Sorry, I had an issue generating a response."
 
-    # Capture free-text user input for further conversation
+    # If the user chooses the first question:
+    if selected_question == "Would you like me to help you understand candidate DiSC personality better for hiring?":
+        # We display the positions and the confirm button
+        positions = [
+            "Project Manager", "Product Owner", "HR Manager", "Accounting Manager",
+            "Finance Manager", "Sale Manager", "Operation Manager", "Data Analyst",
+            "Data Engineer", "Data Science", "Marketing Manager", "Strategy Manager",
+            "Procurement Manager"
+        ]
+        st.markdown("**Please select the position that you would like to hire:**")
+        selected_position = st.radio("Positions:", positions, key="selected_position_radio")
+
+        if st.button("Confirm Position"):
+            # Append user message
+            user_msg = f"I want to hire a {selected_position}."
+            st.session_state.chat_history.append(("user", user_msg))
+            st.chat_message("user").markdown(user_msg)
+            
+            # Do the logic to find top 5
+            df_position_trait = st.session_state["df_position_trait"]
+            df_merged = st.session_state["df_merged"]
+
+            row = df_position_trait[df_position_trait["position"] == selected_position]
+            if row.empty:
+                msg = f"Oops! I don't have trait data for the position: {selected_position}"
+                st.session_state.chat_history.append(("assistant", msg))
+                st.chat_message("assistant").markdown(msg)
+            else:
+                primary_disc = row.iloc[0]["primary_disc"]
+                secondary_disc = row.iloc[0]["secondary_disc"]
+                reason = row.iloc[0]["reason"]
+
+                disc_col_map = {
+                    "D": "D score percentage",
+                    "I": "I score percentage",
+                    "S": "S score percentage",
+                    "C": "C score percentage"
+                }
+                primary_col = disc_col_map.get(primary_disc, None)
+                secondary_col = disc_col_map.get(secondary_disc, None)
+
+                if primary_col is None or secondary_col is None:
+                    msg = "Unable to map DiSC trait columns. Please check your data."
+                    st.session_state.chat_history.append(("assistant", msg))
+                    st.chat_message("assistant").markdown(msg)
+                else:
+                    df_merged["score_sum"] = df_merged[primary_col] + df_merged[secondary_col]
+                    df_sorted = df_merged.sort_values(by="score_sum", ascending=False)
+                    top_5 = df_sorted.head(5)
+
+                    # Summarize top 5
+                    candidate_list = []
+                    for idx, row_ in top_5.iterrows():
+                        candidate_list.append(
+                            f"- **Name**: {row_['Name']} {row_['Surname']} | "
+                            f"Primary DiSC: {row_['DiSC Result']} | "
+                            f"{primary_disc}={row_[primary_col]:.2f} & {secondary_disc}={row_[secondary_col]:.2f}"
+                        )
+                    candidates_text = "\n".join(candidate_list)
+
+                    msg = (
+                        f"**Position**: {selected_position}\n\n"
+                        f"**Ideal DiSC**: Primary={primary_disc}, Secondary={secondary_disc}\n\n"
+                        f"**Reason**: {reason}\n\n"
+                        f"**Top 5 candidates** based on `{primary_col}` + `{secondary_col}`:\n"
+                        f"{candidates_text}"
+                    )
+                    st.session_state.chat_history.append(("assistant", msg))
+                    st.chat_message("assistant").markdown(msg)
+
+    else:
+        # If user chooses "Guiding DiSC profile for new position" or anything else
+        # We can automatically show the LLM response or you can handle it differently
+        personality_prompt = (
+            "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
+            "You have access to candidate results and can provide insights based on the DiSC framework. "
+            "Always be professional, polite, and insightful."
+        )
+        # We'll add a small text to clarify
+        user_msg = f"User selected: {selected_question}"
+        st.session_state.chat_history.append(("user", user_msg))
+        st.chat_message("user").markdown(user_msg)
+
+        bot_response = generate_text_from_google(f"{personality_prompt}\nUser: {selected_question}\nAssistant:")
+        st.session_state.chat_history.append(("assistant", bot_response))
+        st.chat_message("assistant").markdown(bot_response)
+
+    # 6) FREE-TEXT USER INPUT
     user_input = st.chat_input("Type your message here...")
     if user_input:
-        # Display user input
         st.session_state.chat_history.append(("user", user_input))
         st.chat_message("user").markdown(user_input)
 
-        # Generate response from Maddie
-        try:
-            personality_prompt = (
-                "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
-                "You have access to candidate results and can provide insights based on the DiSC framework. "
-                "Always be professional, polite, and insightful."
-            )
-
-            candidate_results = st.session_state.get("disc_data", "No candidate results found.")
-            full_input = f"{personality_prompt}\nCandidate Results: {candidate_results}\nUser: {user_input}\nAssistant:"
-
-            response = model.generate_content(full_input)
-            bot_response = response.text
-
-            # Display bot response
-            st.session_state.chat_history.append(("assistant", bot_response))
-            st.chat_message("assistant").markdown(bot_response)
-        except Exception as e:
-            st.error(f"An error occurred while generating the response: {e}")
+        personality_prompt = (
+            "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
+            "You have access to candidate results and can provide insights based on the DiSC framework. "
+            "Always be professional, polite, and insightful."
+        )
+        full_input = f"{personality_prompt}\nUser: {user_input}\nAssistant:"
+        bot_response = generate_text_from_google(full_input)
+        st.session_state.chat_history.append(("assistant", bot_response))
+        st.chat_message("assistant").markdown(bot_response)
 
 
 ###############################################################################
