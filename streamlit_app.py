@@ -119,6 +119,11 @@ def add_base_styles():
 
 import json
 import io
+import openai
+import streamlit as st
+import pandas as pd
+from google.cloud import storage
+from google.oauth2 import service_account
 
 def merge_csv_from_gcs(bucket_name, prefix):
     """Helper function to merge multiple CSVs from GCS into a single DataFrame."""
@@ -139,7 +144,6 @@ def merge_csv_from_gcs(bucket_name, prefix):
             df_temp = pd.read_csv(io.StringIO(csv_data))
             df_list.append(df_temp)
     
-    # Merge all DataFrames
     if df_list:
         df_merged = pd.concat(df_list, ignore_index=True)
         return df_merged
@@ -192,14 +196,13 @@ def chat_with_candidate_result_page():
         </style>
     """, unsafe_allow_html=True)
 
-    # 1) CONFIGURE Google Generative AI (Palm) with your key
-    gemini_api_key = st.secrets["credentials"]["gemini_api_key"]
-    try:
-        palm.configure(api_key=gemini_api_key)
-        st.success("Gemini (Palm) API Key successfully configured.")
-    except Exception as e:
-        st.error(f"An error occurred while setting up the Gemini model: {e}")
+    # 1) CONFIGURE OPENAI API KEY
+    openai_api_key = st.secrets["credentials"]["open_ai_key"]  # from secrets.toml
+    if not openai_api_key:
+        st.error("OpenAI API Key not found in secrets. Please add [credentials] open_ai_key.")
         return
+    
+    openai.api_key = openai_api_key
 
     # 2) PREPARE DATA
     bucket_name = "streamlit-disc-candidate-bucket"
@@ -252,7 +255,7 @@ def chat_with_candidate_result_page():
         else:
             st.chat_message(role).markdown(message)
 
-    # 5) PRESENT INITIAL QUESTION CHOICES (No "Ask Maddie" button—just the selectbox)
+    # 5) PRESENT INITIAL QUESTION CHOICES
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("### Select a Question to Begin:")
     initial_questions = [
@@ -261,24 +264,34 @@ def chat_with_candidate_result_page():
     ]
     selected_question = st.selectbox("Choose topic to ask Maddie:", initial_questions, index=0)
 
-    def generate_text_from_google(prompt_text: str) -> str:
-        """Call Google's generative AI and return the text result."""
-        model_name = "models/text-bison-001"  # Or "models/chat-bison-001"
+    def generate_text_from_openai(prompt_text: str) -> str:
+        """Use OpenAI ChatCompletion (gpt-3.5-turbo) to generate a response."""
         try:
-            response = palm.generate_text(
-                model=model_name,
-                prompt=prompt_text,
-                temperature=0.7,
-                candidate_count=1
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",  # or "gpt-4" if you have access
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are 'Maddie', an HR Analytics specialist in DiSC personality assessment. "
+                            "Always be professional, polite, and insightful."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt_text
+                    }
+                ],
+                temperature=0.7
             )
-            return response.result
+            # Return the AI's content
+            return response.choices[0].message.content
         except Exception as e:
-            st.error(f"Error calling Palm API: {e}")
+            st.error(f"Error calling OpenAI API: {e}")
             return "Sorry, I had an issue generating a response."
 
-    # If the user chooses the first question:
+    # Logic for the selected question
     if selected_question == "Would you like me to help you understand candidate DiSC personality better for hiring?":
-        # We display the positions and the confirm button
         positions = [
             "Project Manager", "Product Owner", "HR Manager", "Accounting Manager",
             "Finance Manager", "Sale Manager", "Operation Manager", "Data Analyst",
@@ -289,12 +302,10 @@ def chat_with_candidate_result_page():
         selected_position = st.radio("Positions:", positions, key="selected_position_radio")
 
         if st.button("Confirm Position"):
-            # Append user message
             user_msg = f"I want to hire a {selected_position}."
             st.session_state.chat_history.append(("user", user_msg))
             st.chat_message("user").markdown(user_msg)
             
-            # Do the logic to find top 5
             df_position_trait = st.session_state["df_position_trait"]
             df_merged = st.session_state["df_merged"]
 
@@ -326,7 +337,6 @@ def chat_with_candidate_result_page():
                     df_sorted = df_merged.sort_values(by="score_sum", ascending=False)
                     top_5 = df_sorted.head(5)
 
-                    # Summarize top 5
                     candidate_list = []
                     for idx, row_ in top_5.iterrows():
                         candidate_list.append(
@@ -348,18 +358,11 @@ def chat_with_candidate_result_page():
 
     else:
         # If user chooses "Guiding DiSC profile for new position" or anything else
-        # We can automatically show the LLM response or you can handle it differently
-        personality_prompt = (
-            "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
-            "You have access to candidate results and can provide insights based on the DiSC framework. "
-            "Always be professional, polite, and insightful."
-        )
-        # We'll add a small text to clarify
         user_msg = f"User selected: {selected_question}"
         st.session_state.chat_history.append(("user", user_msg))
         st.chat_message("user").markdown(user_msg)
 
-        bot_response = generate_text_from_google(f"{personality_prompt}\nUser: {selected_question}\nAssistant:")
+        bot_response = generate_text_from_openai(f"{selected_question}")
         st.session_state.chat_history.append(("assistant", bot_response))
         st.chat_message("assistant").markdown(bot_response)
 
@@ -369,13 +372,7 @@ def chat_with_candidate_result_page():
         st.session_state.chat_history.append(("user", user_input))
         st.chat_message("user").markdown(user_input)
 
-        personality_prompt = (
-            "Your name is 'Maddie'. You are an HR Analytics specialist in DiSC personality assessment. "
-            "You have access to candidate results and can provide insights based on the DiSC framework. "
-            "Always be professional, polite, and insightful."
-        )
-        full_input = f"{personality_prompt}\nUser: {user_input}\nAssistant:"
-        bot_response = generate_text_from_google(full_input)
+        bot_response = generate_text_from_openai(user_input)
         st.session_state.chat_history.append(("assistant", bot_response))
         st.chat_message("assistant").markdown(bot_response)
 
