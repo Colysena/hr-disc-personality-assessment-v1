@@ -127,13 +127,11 @@ from google.oauth2 import service_account
 
 def merge_csv_from_gcs(bucket_name, prefix):
     """Helper function to merge multiple CSVs from GCS into a single DataFrame."""
-    # --- Initialize GCS credential ---
     service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
     service_account_info = json.loads(service_account_json)
     credentials = service_account.Credentials.from_service_account_info(service_account_info)
     storage_client = storage.Client(credentials=credentials, project=service_account_info["project_id"])
     
-    # Get the bucket and list CSV blobs
     bucket = storage_client.get_bucket(bucket_name)
     blobs = bucket.list_blobs(prefix=prefix)
     
@@ -152,13 +150,11 @@ def merge_csv_from_gcs(bucket_name, prefix):
 
 def get_position_trait_data(bucket_name, file_path):
     """Fetch the position_trait_v1.csv from GCS and return as a DataFrame."""
-    # --- Initialize GCS credential ---
     service_account_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
     service_account_info = json.loads(service_account_json)
     credentials = service_account.Credentials.from_service_account_info(service_account_info)
     storage_client = storage.Client(credentials=credentials, project=service_account_info["project_id"])
 
-    # Fetch the CSV
     bucket = storage_client.get_bucket(bucket_name)
     blob = bucket.blob(file_path)
     csv_data = blob.download_as_text()
@@ -196,30 +192,29 @@ def chat_with_candidate_result_page():
         </style>
     """, unsafe_allow_html=True)
 
-    # 1) CONFIGURE OPENAI API KEY
-    openai_api_key = st.secrets["credentials"]["open_ai_key"]  # from secrets.toml
+    # 1) CONFIGURE OPENAI
+    openai_api_key = st.secrets["credentials"]["open_ai_key"]
     if not openai_api_key:
-        st.error("OpenAI API Key not found in secrets. Please add [credentials] open_ai_key.")
+        st.error("OpenAI API Key not found in secrets.")
         return
-    
     openai.api_key = openai_api_key
 
     # 2) PREPARE DATA
     bucket_name = "streamlit-disc-candidate-bucket"
-
-    # Merge all CSVs within disc_results/
     prefix = "disc_results/"
     df_merged = merge_csv_from_gcs(bucket_name, prefix)
 
-    # Load the position_trait_v1.csv
     trait_file_path = "position_trait/position_trait_v1.csv"
     df_position_trait = get_position_trait_data(bucket_name, trait_file_path)
 
-    # Store data in session state for re-use
     if "df_merged" not in st.session_state:
         st.session_state["df_merged"] = df_merged
     if "df_position_trait" not in st.session_state:
         st.session_state["df_position_trait"] = df_position_trait
+
+    # For OpenAI context
+    if "candidate_data_str" not in st.session_state:
+        st.session_state["candidate_data_str"] = df_merged.to_csv(index=False)
 
     # 3) INITIALIZE CHAT HISTORY
     if "chat_history" not in st.session_state:
@@ -255,118 +250,156 @@ def chat_with_candidate_result_page():
         else:
             st.chat_message(role).markdown(message)
 
-    # 5) PRESENT INITIAL QUESTION CHOICES
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("### Select a Question to Begin:")
-    initial_questions = [
-        "Would you like me to help you understand candidate DiSC personality better for hiring?",
-        "Guiding DiSC profile for new position"
-    ]
-    selected_question = st.selectbox("Choose topic to ask Maddie:", initial_questions, index=0)
-
     def generate_text_from_openai(prompt_text: str) -> str:
-        """Use OpenAI ChatCompletion (gpt-3.5-turbo) to generate a response."""
+        """Use OpenAI ChatCompletion with candidate data as context."""
         try:
+            system_prompt = (
+                "You are 'Maddie', an HR Analytics specialist in DiSC personality assessment. "
+                "You have access to a CSV containing candidate data (including their DiSC result). "
+                "Answer user questions based on this data. "
+                "Always be professional, polite, and insightful."
+            )
+            candidate_data_context = st.session_state["candidate_data_str"]
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": f"Candidate Data:\n{candidate_data_context}"},
+                {"role": "user", "content": prompt_text}
+            ]
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",  # or "gpt-4" if you have access
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are 'Maddie', an HR Analytics specialist in DiSC personality assessment. "
-                            "Always be professional, polite, and insightful."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt_text
-                    }
-                ],
+                model="gpt-3.5-turbo",
+                messages=messages,
                 temperature=0.7
             )
-            # Return the AI's content
             return response.choices[0].message.content
         except Exception as e:
             st.error(f"Error calling OpenAI API: {e}")
             return "Sorry, I had an issue generating a response."
 
-    # Logic for the selected question
-    if selected_question == "Would you like me to help you understand candidate DiSC personality better for hiring?":
-        positions = [
-            "Project Manager", "Product Owner", "HR Manager", "Accounting Manager",
-            "Finance Manager", "Sale Manager", "Operation Manager", "Data Analyst",
-            "Data Engineer", "Data Science", "Marketing Manager", "Strategy Manager",
-            "Procurement Manager"
+    # ------------------------------------------
+    #  Move question selection & position pick to the sidebar
+    # ------------------------------------------
+    with st.sidebar:
+        st.markdown("### Select a Question to Begin:")
+        initial_questions = [
+            "Would you like me to help you understand candidate DiSC personality better for hiring?",
+            "Guiding DiSC profile for new position"
         ]
-        st.markdown("**Please select the position that you would like to hire:**")
-        selected_position = st.radio("Positions:", positions, key="selected_position_radio")
+        selected_question = st.selectbox("Choose topic to ask Maddie:", initial_questions, index=0)
 
-        if st.button("Confirm Position"):
-            user_msg = f"I want to hire a {selected_position}."
-            st.session_state.chat_history.append(("user", user_msg))
-            st.chat_message("user").markdown(user_msg)
-            
-            df_position_trait = st.session_state["df_position_trait"]
-            df_merged = st.session_state["df_merged"]
+        # If user chooses the first question, show positions
+        if selected_question == "Would you like me to help you understand candidate DiSC personality better for hiring?":
+            st.markdown("## Please select the position that you would like to hire:")
+            positions = [
+                "Project Manager", "Product Owner", "HR Manager", "Accounting Manager",
+                "Finance Manager", "Sale Manager", "Operation Manager", "Data Analyst",
+                "Data Engineer", "Data Science", "Marketing Manager", "Strategy Manager",
+                "Procurement Manager"
+            ]
+            selected_position = st.radio("Positions:", positions, key="selected_position_radio")
 
-            row = df_position_trait[df_position_trait["position"] == selected_position]
-            if row.empty:
-                msg = f"Oops! I don't have trait data for the position: {selected_position}"
-                st.session_state.chat_history.append(("assistant", msg))
-                st.chat_message("assistant").markdown(msg)
-            else:
-                primary_disc = row.iloc[0]["primary_disc"]
-                secondary_disc = row.iloc[0]["secondary_disc"]
-                reason = row.iloc[0]["reason"]
+            # We'll store any output message in session_state, then render it in main area
+            if st.button("Confirm Position"):
+                # Put the user prompt in chat history
+                user_msg = f"I want to hire a {selected_position}."
+                st.session_state.chat_history.append(("user", user_msg))
 
-                disc_col_map = {
-                    "D": "D score percentage",
-                    "I": "I score percentage",
-                    "S": "S score percentage",
-                    "C": "C score percentage"
-                }
-                primary_col = disc_col_map.get(primary_disc, None)
-                secondary_col = disc_col_map.get(secondary_disc, None)
+                # Logic: find top 5 using primary disc, fallback to secondary
+                df_position_trait = st.session_state["df_position_trait"]
+                df_merged = st.session_state["df_merged"]
 
-                if primary_col is None or secondary_col is None:
-                    msg = "Unable to map DiSC trait columns. Please check your data."
-                    st.session_state.chat_history.append(("assistant", msg))
-                    st.chat_message("assistant").markdown(msg)
+                row = df_position_trait[df_position_trait["position"] == selected_position]
+                if row.empty:
+                    msg = f"Oops! I don't have trait data for the position: {selected_position}"
                 else:
-                    df_merged["score_sum"] = df_merged[primary_col] + df_merged[secondary_col]
-                    df_sorted = df_merged.sort_values(by="score_sum", ascending=False)
-                    top_5 = df_sorted.head(5)
+                    primary_disc = row.iloc[0]["primary_disc"]
+                    secondary_disc = row.iloc[0]["secondary_disc"]
+                    reason = row.iloc[0]["reason"]
 
-                    candidate_list = []
-                    for idx, row_ in top_5.iterrows():
-                        candidate_list.append(
-                            f"- **Name**: {row_['Name']} {row_['Surname']} | "
-                            f"Primary DiSC: {row_['DiSC Result']} | "
-                            f"{primary_disc}={row_[primary_col]:.2f} & {secondary_disc}={row_[secondary_col]:.2f}"
-                        )
-                    candidates_text = "\n".join(candidate_list)
+                    df_primary_only = df_merged[df_merged["DiSC Result"] == primary_disc]
+                    disc_col_map = {
+                        "D": "D score percentage",
+                        "I": "I score percentage",
+                        "S": "S score percentage",
+                        "C": "C score percentage"
+                    }
 
-                    msg = (
-                        f"**Position**: {selected_position}\n\n"
-                        f"**Ideal DiSC**: Primary={primary_disc}, Secondary={secondary_disc}\n\n"
-                        f"**Reason**: {reason}\n\n"
-                        f"**Top 5 candidates** based on `{primary_col}` + `{secondary_col}`:\n"
-                        f"{candidates_text}"
-                    )
-                    st.session_state.chat_history.append(("assistant", msg))
-                    st.chat_message("assistant").markdown(msg)
+                    if not df_primary_only.empty:
+                        primary_col = disc_col_map.get(primary_disc, None)
+                        if primary_col and primary_col in df_primary_only.columns:
+                            df_primary_only = df_primary_only.sort_values(by=primary_col, ascending=False)
+                            top_5 = df_primary_only.head(5)
+                            candidate_list = []
+                            for idx, row_ in top_5.iterrows():
+                                candidate_list.append(
+                                    f"- **Name**: {row_['Name']} {row_['Surname']} | "
+                                    f"DiSC: {row_['DiSC Result']} | "
+                                    f"{primary_disc}={row_[primary_col]:.2f}"
+                                )
+                            candidates_text = "\n".join(candidate_list)
+                            msg = (
+                                f"**Position**: {selected_position}\n\n"
+                                f"**Ideal DiSC**: Primary={primary_disc}\n\n"
+                                f"**Reason**: {reason}\n\n"
+                                f"**Top 5 candidates (Primary Only)**:\n"
+                                f"{candidates_text}"
+                            )
+                        else:
+                            msg = f"Column not found for disc trait {primary_disc}"
+                    else:
+                        # fallback to secondary
+                        secondary_col = disc_col_map.get(secondary_disc, None)
+                        df_secondary = df_merged[df_merged["DiSC Result"] == secondary_disc]
+                        if df_secondary.empty or not secondary_col or secondary_col not in df_secondary.columns:
+                            msg = (
+                                f"No candidate found for primary Disc ({primary_disc}) "
+                                f"or secondary Disc ({secondary_disc})."
+                            )
+                        else:
+                            df_secondary = df_secondary.sort_values(by=secondary_col, ascending=False)
+                            top_5 = df_secondary.head(5)
 
-    else:
-        # If user chooses "Guiding DiSC profile for new position" or anything else
-        user_msg = f"User selected: {selected_question}"
-        st.session_state.chat_history.append(("user", user_msg))
-        st.chat_message("user").markdown(user_msg)
+                            candidate_list = []
+                            for idx, row_ in top_5.iterrows():
+                                candidate_list.append(
+                                    f"- **Name**: {row_['Name']} {row_['Surname']} | "
+                                    f"DiSC: {row_['DiSC Result']} | "
+                                    f"{secondary_disc}={row_[secondary_col]:.2f}"
+                                )
+                            candidates_text = "\n".join(candidate_list)
+                            msg = (
+                                f"**Position**: {selected_position}\n\n"
+                                f"**Ideal DiSC**: Primary={primary_disc} (not found), using Secondary={secondary_disc}\n\n"
+                                f"**Reason**: {reason}\n\n"
+                                f"**Top 5 candidates (Secondary)**:\n"
+                                f"{candidates_text}"
+                            )
 
-        bot_response = generate_text_from_openai(f"{selected_question}")
-        st.session_state.chat_history.append(("assistant", bot_response))
-        st.chat_message("assistant").markdown(bot_response)
+                st.session_state["position_result_msg"] = msg
 
-    # 6) FREE-TEXT USER INPUT
+        else:
+            # If user chooses "Guiding DiSC profile for new position" or anything else
+            user_msg = f"User selected: {selected_question}"
+            st.session_state.chat_history.append(("user", user_msg))
+            bot_response = generate_text_from_openai(selected_question)
+            st.session_state.chat_history.append(("assistant", bot_response))
+
+            # We'll display in main area
+            st.session_state["position_result_msg"] = None  # Indicate no new message from position logic
+
+    # ------------------------------------------
+    # Render the final message in main area
+    # ------------------------------------------
+    # If "position_result_msg" was set
+    if "position_result_msg" in st.session_state and st.session_state["position_result_msg"] is not None:
+        # Add to chat history if desired
+        st.session_state.chat_history.append(("assistant", st.session_state["position_result_msg"]))
+        # Display in main area
+        st.chat_message("assistant").markdown(st.session_state["position_result_msg"])
+        # Clear it once shown
+        del st.session_state["position_result_msg"]
+
+    # 8) FREE-TEXT USER INPUT in main area
     user_input = st.chat_input("Type your message here...")
     if user_input:
         st.session_state.chat_history.append(("user", user_input))
